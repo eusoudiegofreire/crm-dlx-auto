@@ -7,6 +7,14 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Sem env vars configuradas, não tenta criar o client (evita crash na Vercel)
+  if (
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    redirect("/login");
+  }
+
   const supabase = await createClient();
 
   let user = null;
@@ -14,7 +22,7 @@ export default async function DashboardLayout({
     const { data } = await supabase.auth.getUser();
     user = data.user;
   } catch {
-    // Supabase não configurado ou sem conexão — redireciona para login
+    // Falha de conexão — redireciona para login
   }
 
   if (!user) redirect("/login");

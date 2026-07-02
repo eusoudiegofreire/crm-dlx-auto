@@ -56,7 +56,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Exclui rotas /api/* do middleware — elas têm autenticação própria (Bearer, etc.)
+  // Rotas de página que precisam de sessão continuam protegidas normalmente.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

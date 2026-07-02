@@ -69,10 +69,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 5. Buscar telefone do contato
+  // 5. Buscar telefone e chat_id completo do contato
   const { data: contact } = await admin
     .from("contacts")
-    .select("id, phone")
+    .select("id, phone, whatsapp_chat_id")
     .eq("id", conversation.contact_id)
     .single();
 
@@ -82,6 +82,11 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Prefere o identificador completo do WhatsApp (@lid / @s.whatsapp.net)
+  // Se ausente, cai no número puro — mas avisa a recepcionista
+  const chatTarget = (contact.whatsapp_chat_id as string | null) || null;
+  const missingChatId = !chatTarget;
 
   // 6. Inserir mensagem no banco
   const preview =
@@ -119,12 +124,21 @@ export async function POST(request: NextRequest) {
 
   // 8. Disparar pro VPS — falha aqui NÃO desfaz o insert acima
   let warning: string | null = null;
+  let warning_code: string | null = null;
+
+  // Aviso prioritário: contato sem identificador completo do WhatsApp
+  if (missingChatId) {
+    warning_code = "no_chat_id";
+    warning =
+      "Identificador completo do WhatsApp (@lid) não encontrado para este contato — o envio pode falhar silenciosamente. Aguarde o contato enviar uma mensagem para o sistema capturar o ID correto.";
+  }
 
   const vpsUrl = process.env.HERMES_VPS_URL;
   const vpsToken = process.env.HERMES_VPS_TOKEN;
 
   if (!vpsUrl || !vpsToken) {
     console.warn("[hermes/send] HERMES_VPS_URL ou HERMES_VPS_TOKEN não configurados");
+    warning_code = warning_code ?? "vps_error";
     warning =
       "VPS não configurado — mensagem salva no banco mas não enviada ao WhatsApp.";
   } else {
@@ -136,30 +150,35 @@ export async function POST(request: NextRequest) {
           Authorization: `Bearer ${vpsToken}`,
         },
         body: JSON.stringify({
-          phone: contact.phone,
+          // Usa o identificador completo se disponível; fallback pro número puro
+          phone: chatTarget ?? contact.phone,
           message: messageText,
         }),
-        signal: AbortSignal.timeout(8000), // 8s — não pode travar o agente esperando
+        signal: AbortSignal.timeout(8000),
       });
 
       if (!vpsRes.ok) {
         const errText = await vpsRes.text().catch(() => "");
-        console.error(
-          `[hermes/send] VPS retornou ${vpsRes.status}: ${errText}`
-        );
-        warning =
-          "Mensagem salva, mas o servidor WhatsApp retornou erro. Verifique se chegou ao paciente.";
+        console.error(`[hermes/send] VPS retornou ${vpsRes.status}: ${errText}`);
+        if (!warning_code) {
+          warning_code = "vps_error";
+          warning =
+            "Mensagem salva, mas o servidor WhatsApp retornou erro. Verifique se chegou ao paciente.";
+        }
       }
     } catch (err) {
       console.error("[hermes/send] Erro ao contactar VPS:", err);
-      warning =
-        "Mensagem salva, mas não foi possível contatar o servidor do WhatsApp. Confirme com o paciente.";
+      if (!warning_code) {
+        warning_code = "vps_error";
+        warning =
+          "Mensagem salva, mas não foi possível contatar o servidor do WhatsApp. Confirme com o paciente.";
+      }
     }
   }
 
   return NextResponse.json({
     status: "ok",
     message_id: newMessage.id,
-    ...(warning && { warning }),
+    ...(warning && { warning, warning_code }),
   });
 }

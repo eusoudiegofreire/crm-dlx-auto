@@ -4,7 +4,8 @@ import { hashApiKey } from "@/lib/api-keys/keys";
 
 interface HermesPayload {
   contact_phone: string;
-  contact_name: string | null;
+  contact_chat_id?: string | null;
+  contact_name?: string | null;
   message: string;
   direction: "inbound" | "outbound";
 }
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Body JSON inválido" }, { status: 400 });
     }
 
-    const { contact_phone, contact_name, message, direction } = body;
+    const { contact_phone, contact_chat_id, contact_name, message, direction } = body;
 
     if (!contact_phone || !message || !direction) {
       return NextResponse.json(
@@ -79,6 +80,13 @@ export async function POST(request: NextRequest) {
 
     if (existingContact) {
       contactId = existingContact.id as string;
+      // Atualiza whatsapp_chat_id se veio preenchido (não sobrescreve com null)
+      if (contact_chat_id) {
+        await admin
+          .from("contacts")
+          .update({ whatsapp_chat_id: contact_chat_id })
+          .eq("id", contactId);
+      }
     } else {
       const { data: newContact, error: contactError } = await admin
         .from("contacts")
@@ -87,6 +95,7 @@ export async function POST(request: NextRequest) {
           name: contact_name?.trim() || phone,
           phone,
           source: "whatsapp",
+          ...(contact_chat_id ? { whatsapp_chat_id: contact_chat_id } : {}),
         })
         .select("id")
         .single();

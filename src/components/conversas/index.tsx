@@ -64,6 +64,7 @@ export function ConversasClient({
   const [inputValue, setInputValue] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [sendWarning, setSendWarning] = useState<string | null>(null);
+  const [sendWarningCode, setSendWarningCode] = useState<"no_chat_id" | "vps_error" | null>(null);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -104,6 +105,7 @@ export function ConversasClient({
   useEffect(() => {
     setInputValue("");
     setSendWarning(null);
+    setSendWarningCode(null);
   }, [selectedConvId]);
 
   // ── Textarea auto-resize ────────────────────────────────────
@@ -259,6 +261,7 @@ export function ConversasClient({
     setInputValue("");
     setIsSending(true);
     setSendWarning(null);
+    setSendWarningCode(null);
 
     try {
       const res = await fetch("/api/hermes/send", {
@@ -270,14 +273,17 @@ export function ConversasClient({
       const data = await res.json();
 
       if (!res.ok) {
-        setInputValue(text); // restaura o texto se falhou
+        setInputValue(text);
         setSendWarning(data.error ?? "Erro ao enviar mensagem");
+        setSendWarningCode("vps_error");
       } else if (data.warning) {
         setSendWarning(data.warning);
+        setSendWarningCode(data.warning_code ?? "vps_error");
       }
     } catch {
       setInputValue(text);
       setSendWarning("Erro de rede ao enviar mensagem");
+      setSendWarningCode("vps_error");
     } finally {
       setIsSending(false);
       textareaRef.current?.focus();
@@ -509,7 +515,7 @@ export function ConversasClient({
                   onChange={(e) => {
                     if (!isHermesActive) {
                       setInputValue(e.target.value);
-                      if (sendWarning) setSendWarning(null);
+                      if (sendWarning) { setSendWarning(null); setSendWarningCode(null); }
                     }
                   }}
                   onKeyDown={handleKeyDown}
@@ -544,7 +550,17 @@ export function ConversasClient({
                 </button>
               </div>
 
-              {sendWarning && (
+              {sendWarning && sendWarningCode === "no_chat_id" && (
+                <div className="mt-2 px-3 py-2 rounded-lg border border-orange-500/30 bg-orange-500/8">
+                  <p className="text-[11px] text-orange-400 font-medium leading-relaxed">
+                    ⚠ ID do WhatsApp não encontrado
+                  </p>
+                  <p className="text-[11px] text-orange-400/70 mt-0.5 leading-relaxed">
+                    {sendWarning}
+                  </p>
+                </div>
+              )}
+              {sendWarning && sendWarningCode !== "no_chat_id" && (
                 <p className="text-[11px] text-yellow-500/70 mt-1.5 px-1">
                   ⚠ {sendWarning}
                 </p>

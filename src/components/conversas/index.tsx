@@ -61,13 +61,18 @@ export function ConversasClient({
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendWarning, setSendWarning] = useState<string | null>(null);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wasDisconnectedRef = useRef(false);
 
   const selectedConv = conversations.find((c) => c.id === selectedConvId) ?? null;
-  const isHermesActive = selectedConv ? !selectedConv.hermes_paused : false;
+  // isHermesActive = false quando hermes_paused = true (agente no controle)
+  const isHermesActive = selectedConv ? !selectedConv.hermes_paused : true;
 
   // ── Filtered conversations ──────────────────────────────────
   const filteredConversations = conversations.filter((c) => {
@@ -94,6 +99,21 @@ export function ConversasClient({
     }, 60);
     return () => clearTimeout(t);
   }, [selectedConvId, messages.length]);
+
+  // ── Reset input when conversation changes ──────────────────
+  useEffect(() => {
+    setInputValue("");
+    setSendWarning(null);
+  }, [selectedConvId]);
+
+  // ── Textarea auto-resize ────────────────────────────────────
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 112)}px`;
+    }
+  }, [inputValue]);
 
   // ── Load messages + subscribe when conversation selected ───
   useEffect(() => {
@@ -170,14 +190,16 @@ export function ConversasClient({
             .eq("id", payload.new.id)
             .single();
           if (data) {
-            setConversations((prev) => [data as unknown as ConversationRow, ...prev]);
+            setConversations((prev) => [
+              data as unknown as ConversationRow,
+              ...prev,
+            ]);
           }
         }
       )
       .subscribe((status: string) => {
         if (status === "SUBSCRIBED") {
           setIsRealtimeConnected(true);
-          // Refetch after reconnect to catch missed events
           if (wasDisconnectedRef.current) {
             wasDisconnectedRef.current = false;
             fetchConversations(supabase)
@@ -209,7 +231,6 @@ export function ConversasClient({
     if (!selectedConvId || !selectedConv) return;
     const newPaused = !selectedConv.hermes_paused;
 
-    // Optimistic update
     setConversations((prev) =>
       prev.map((c) =>
         c.id === selectedConvId ? { ...c, hermes_paused: newPaused } : c
@@ -222,15 +243,51 @@ export function ConversasClient({
       .eq("id", selectedConvId);
 
     if (error) {
-      // Rollback
       setConversations((prev) =>
         prev.map((c) =>
-          c.id === selectedConvId
-            ? { ...c, hermes_paused: !newPaused }
-            : c
+          c.id === selectedConvId ? { ...c, hermes_paused: !newPaused } : c
         )
       );
       console.error("[hermes toggle]", error.message);
+    }
+  }
+
+  async function handleSend() {
+    if (!inputValue.trim() || !selectedConvId || isHermesActive || isSending) return;
+
+    const text = inputValue.trim();
+    setInputValue("");
+    setIsSending(true);
+    setSendWarning(null);
+
+    try {
+      const res = await fetch("/api/hermes/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: selectedConvId, message: text }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setInputValue(text); // restaura o texto se falhou
+        setSendWarning(data.error ?? "Erro ao enviar mensagem");
+      } else if (data.warning) {
+        setSendWarning(data.warning);
+      }
+    } catch {
+      setInputValue(text);
+      setSendWarning("Erro de rede ao enviar mensagem");
+    } finally {
+      setIsSending(false);
+      textareaRef.current?.focus();
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   }
 
@@ -344,7 +401,6 @@ export function ConversasClient({
                 </p>
               </div>
 
-              {/* Realtime disconnected indicator */}
               {!isRealtimeConnected && (
                 <div className="flex items-center gap-1.5 px-2 py-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 text-xs shrink-0">
                   <WifiOff className="h-3 w-3" />
@@ -439,32 +495,63 @@ export function ConversasClient({
               </button>
             </div>
 
-            {/* Input area — envio manual pendente */}
+            {/* Input area */}
             <div className="shrink-0 p-3 border-t border-white/7">
               <div className="flex items-end gap-2">
                 <textarea
-                  placeholder="Envio manual indisponível — integração CRM → WhatsApp pendente"
+                  ref={textareaRef}
+                  placeholder={
+                    isHermesActive
+                      ? "Sofia está gerenciando — clique em 'Assumir conversa' para enviar"
+                      : "Digite uma mensagem... (Enter para enviar)"
+                  }
+                  value={inputValue}
+                  onChange={(e) => {
+                    if (!isHermesActive) {
+                      setInputValue(e.target.value);
+                      if (sendWarning) setSendWarning(null);
+                    }
+                  }}
+                  onKeyDown={handleKeyDown}
                   rows={1}
-                  disabled
-                  className="flex-1 bg-[#161210]/50 border border-white/5 rounded-xl px-4 py-2.5 text-sm resize-none text-muted-foreground/30 placeholder:text-muted-foreground/25 cursor-not-allowed overflow-hidden"
+                  disabled={isHermesActive || isSending}
+                  className={cn(
+                    "flex-1 border rounded-xl px-4 py-2.5 text-sm resize-none transition-colors duration-75 overflow-hidden",
+                    !isHermesActive
+                      ? "bg-[#161210] border-white/7 text-foreground placeholder:text-muted-foreground/35 focus:outline-none focus:border-primary/30 disabled:opacity-60"
+                      : "bg-[#161210]/50 border-white/5 placeholder:text-muted-foreground/25 cursor-not-allowed"
+                  )}
                   style={{ maxHeight: "112px" }}
                 />
                 <button
-                  disabled
-                  className="h-[42px] w-[42px] rounded-xl bg-muted/20 flex items-center justify-center text-muted-foreground/25 shrink-0 cursor-not-allowed"
-                  aria-label="Envio indisponível"
-                  title="Integração CRM → WhatsApp pendente"
+                  onClick={handleSend}
+                  disabled={isHermesActive || !inputValue.trim() || isSending}
+                  className={cn(
+                    "h-[42px] w-[42px] rounded-xl flex items-center justify-center shrink-0 transition-all duration-75",
+                    !isHermesActive && inputValue.trim() && !isSending
+                      ? "bg-primary text-white hover:bg-primary/90 active:scale-95"
+                      : "bg-muted/20 text-muted-foreground/20 cursor-not-allowed"
+                  )}
+                  aria-label={
+                    isHermesActive ? "Envio indisponível" : "Enviar mensagem"
+                  }
                 >
-                  <Send className="h-4 w-4" />
+                  {isSending ? (
+                    <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </button>
               </div>
-              <p className="text-[11px] text-yellow-500/50 mt-1.5 px-1">
-                ⚠ Envio manual requer integração CRM → WhatsApp. Ver resumo técnico.
-              </p>
+
+              {sendWarning && (
+                <p className="text-[11px] text-yellow-500/70 mt-1.5 px-1">
+                  ⚠ {sendWarning}
+                </p>
+              )}
             </div>
           </>
         ) : (
-          /* Empty state */
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="h-16 w-16 rounded-2xl bg-[#1E1916] border border-white/5 flex items-center justify-center mb-5">
               <MessageSquare className="h-7 w-7 text-primary/35" />
@@ -505,11 +592,9 @@ function ConversationItem({ conv, isSelected, onSelect }: ConversationItemProps)
       {isSelected && (
         <span className="absolute left-0 top-2 bottom-2 w-0.5 rounded-r-full bg-primary" />
       )}
-
       <div className="shrink-0 h-9 w-9 rounded-full bg-primary/12 flex items-center justify-center text-xs font-bold text-primary">
         {getInitials(contactName)}
       </div>
-
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span
@@ -582,7 +667,6 @@ function MessageBubble({ message, prevSender }: MessageBubbleProps) {
     );
   }
 
-  // agent (human)
   return (
     <div className={cn("flex justify-end", isSameSender && "mt-0.5")}>
       <div className="max-w-[78%] px-4 py-2.5 bg-[#1A1E1C] border border-[#10B981]/20 text-sm leading-relaxed text-foreground/90 rounded-[16px_4px_16px_16px]">

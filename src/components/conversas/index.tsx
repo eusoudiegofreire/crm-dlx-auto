@@ -240,6 +240,22 @@ export function ConversasClient({
 
   function handleSelectConv(id: string) {
     setSelectedConvId(id);
+
+    // Marca como lida — zera unread_count localmente e no banco
+    const conv = conversations.find((c) => c.id === id);
+    if (!conv || conv.unread_count === 0) return;
+
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c))
+    );
+
+    supabase
+      .from("conversations")
+      .update({ unread_count: 0 })
+      .eq("id", id)
+      .then(({ error }) => {
+        if (error) console.error("[mark read]", error.message);
+      });
   }
 
   async function handleToggleHermes() {

@@ -46,11 +46,13 @@ function formatTime(iso: string): string {
 interface ConversasClientProps {
   initialConversations: ConversationRow[];
   workspaceId: string;
+  initialContactId?: string | null;
 }
 
 export function ConversasClient({
   initialConversations,
   workspaceId,
+  initialContactId,
 }: ConversasClientProps) {
   const supabase = useMemo(() => createClient(), []);
 
@@ -70,6 +72,7 @@ export function ConversasClient({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wasDisconnectedRef = useRef(false);
+  const didAutoSelectRef = useRef(false);
 
   const selectedConv = conversations.find((c) => c.id === selectedConvId) ?? null;
   // isHermesActive = false quando hermes_paused = true (agente no controle)
@@ -92,6 +95,16 @@ export function ConversasClient({
     waiting: conversations.filter((c) => c.status === "waiting").length,
     resolved: conversations.filter((c) => c.status === "resolved").length,
   };
+
+  // ── Auto-selecionar conversa ao vir do kanban (?contact=uuid) ─
+  useEffect(() => {
+    if (didAutoSelectRef.current || !initialContactId || conversations.length === 0) return;
+    const match = conversations.find((c) => c.contacts?.id === initialContactId);
+    if (match) {
+      setSelectedConvId(match.id);
+      didAutoSelectRef.current = true;
+    }
+  }, [initialContactId, conversations]);
 
   // ── Scroll to bottom ───────────────────────────────────────
   useEffect(() => {

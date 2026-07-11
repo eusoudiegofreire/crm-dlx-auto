@@ -4,7 +4,11 @@ import { ConversasClient } from "@/components/conversas";
 import { fetchConversations } from "@/lib/conversas/queries";
 import type { ConversationRow } from "@/lib/conversas/types";
 
-export default async function ConversasPage() {
+export default async function ConversasPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ contact?: string }>;
+}) {
   const supabase = await createClient();
 
   const {
@@ -20,6 +24,10 @@ export default async function ConversasPage() {
 
   const workspaceId = (profile?.workspace_id as string | null) ?? "";
 
+  // contact_id vindo do kanban (/conversas?contact=<uuid>)
+  const params = await searchParams;
+  const initialContactId = params.contact ?? null;
+
   let conversations: ConversationRow[] = [];
   if (workspaceId) {
     try {
@@ -33,6 +41,7 @@ export default async function ConversasPage() {
     <ConversasClient
       initialConversations={conversations}
       workspaceId={workspaceId}
+      initialContactId={initialContactId}
     />
   );
 }

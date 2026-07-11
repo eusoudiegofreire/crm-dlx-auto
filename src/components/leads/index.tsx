@@ -447,7 +447,7 @@ function LeadCard({ contact, onAnalyze, isOverlay = false }: LeadCardProps) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <a
-          href="/conversas"
+          href={`/conversas?contact=${contact.id}`}
           className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground/55 hover:text-foreground hover:bg-white/6 transition-colors duration-75"
         >
           <MessageSquare className="h-3 w-3" />
